@@ -128,6 +128,7 @@ async function createPage() {
   classes.forEach(cls => {
     children.push(...classTemplate(cls));
   });
+  if (children.length > 90) children.length = 90; // 블록 수 제한 방지
 
   const payload = {
     parent: { database_id: DATABASE_ID },
