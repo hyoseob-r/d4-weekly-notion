@@ -1,5 +1,6 @@
 import axios from 'axios';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+import { applyKoreanTerms } from "./korean_dict.js";
 
 export async function makeSummary(sourcesBySite){
   const lines = [];
