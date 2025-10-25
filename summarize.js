@@ -39,5 +39,6 @@ export async function makeSummary(sourcesBySite){
     timeout: 60000
   });
   const text = data.choices?.[0]?.message?.content?.trim() || "(요약 생성 실패)";
+  text = await applyKoreanTerms(text);
   return text;
 }
