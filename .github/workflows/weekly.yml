@@ -22,7 +22,7 @@ jobs:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-           KR_BILINGUAL: "false"
+           KR_BILINGUAL: "true"
  
         run: |
           node index.js
