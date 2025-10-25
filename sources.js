@@ -20,8 +20,11 @@ async function fetchHTML(url) {
 }
 
 // 빌드 링크 + 세부 본문 일부 파싱
-export async function collectSources() {
-  const results = {};
+export async function fetchSources() {
+   const results = {};
+   ...
+   return results;
+}
 
   // MAXROLL
   try {
