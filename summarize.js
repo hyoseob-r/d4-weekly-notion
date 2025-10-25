@@ -69,9 +69,8 @@ text = text
   .replace(/\n\s*\|/g, "\n-") // 나머지 표 라인 제거
   .replace(/엔드게임 빌드/g, "\n\n---\n\n#### 💀 엔드게임 빌드");
 
-text = await applyKoreanTerms(text);
+// 변환 적용
+text = await applyKoreanTerms(text, { bilingual: process.env.KR_BILINGUAL === "true" });
 return text;
 
-  text = await applyKoreanTerms(text);
-  return text;
 }
