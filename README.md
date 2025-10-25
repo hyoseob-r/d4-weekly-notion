@@ -1,27 +1,17 @@
-# Diablo4 Weekly Notion Updater (Free, GitHub Actions)
+# Diablo4 Weekly Notion (Pro)
+- 주요 커뮤니티( Maxroll / D4builds / Icy Veins / Reddit / 인벤 )의 최신 빌드 **링크**를 수집하고,
+- OpenAI API로 **요약 텍스트**를 생성해,
+- Notion DB에 **가득 찬 주간 리포트 페이지**를 만듭니다.
 
-This package creates a **weekly Notion page** every Friday 09:00 KST with a structured template for Diablo IV meta builds.
-It does **not** require any paid API. You only need a Notion Internal Integration token and a Notion Database.
+## Secrets (GitHub → Settings → Secrets → Actions)
+- `NOTION_TOKEN` — Notion Internal Integration token
+- `NOTION_DATABASE_ID` — Target database id (share the integration with the DB)
+- `OPENAI_API_KEY` — OpenAI API key
 
-## Quick Setup
+## 실행
+- Actions → **Diablo4 Weekly Notion (Pro)** → Run workflow
+- 매주 금요일 09:00 KST 자동 실행
 
-1) Create a Notion Integration: https://www.notion.so/my-integrations (Read/Write)
-2) Share your target Notion Database with the integration.
-3) Get your **Database ID** (the long hex in the database URL).
-4) Create a new GitHub repository, upload these files.
-5) In GitHub → Settings → Secrets and variables → Actions:
-   - `NOTION_TOKEN` = your integration token
-   - `NOTION_DATABASE_ID` = your database id
-6) The workflow runs every Friday 09:00 KST (00:00 UTC). You can also trigger it manually via **Run workflow**.
-
-## Notion Database Properties
-- **Name** (title)
-- **Week** (rich_text) — optional
-
-## What it does
-- Creates a new page under the database with a full scaffold:
-  - Sources
-  - Per-class sections (Start/End setups)
-  - Placeholders for Items, Gems, Glyphs, Specialization, Skills, Paragon, Seasonal mechanic, Efficiency, Diffs
-
-You can later enhance `index.js` to fetch and parse live data.
+## 제한
+- 각 사이트가 차단하면 링크 수집만 수행될 수 있습니다.
+- Notion API 한 번 호출당 100블록 제한 → 95블록만 전송.
