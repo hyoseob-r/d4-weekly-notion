@@ -1,45 +1,87 @@
-import axios from 'axios';
-import * as cheerio from 'cheerio';
+import axios from "axios";
+import * as cheerio from "cheerio";
 
-async function fetchList(url, selector, attr='href', titleSel=null){
-  try{
-    const { data } = await axios.get(url, { timeout: 15000, headers: { 'User-Agent':'Mozilla/5.0 (compatible; D4Bot/1.0)' } });
-    const $ = cheerio.load(data);
-    const items = [];
-    $(selector).each((_, el)=>{
-      const href = $(el).attr(attr);
-      const title = titleSel ? $(el).find(titleSel).text().trim() : $(el).text().trim();
-      if(href && title){
-        const abs = href.startsWith('http') ? href : new URL(href, url).toString();
-        items.push({ title, url: abs });
-      }
-    });
-    return items.slice(0, 5);
-  }catch(e){
-    return [];
-  }
+// 수집 대상 사이트
+const SITES = {
+  maxroll: "https://maxroll.gg/d4/build-guides",
+  d4builds: "https://d4builds.gg/",
+  icyveins: "https://www.icy-veins.com/d4/",
+  reddit: "https://www.reddit.com/r/diablo4/",
+  inven: "https://www.inven.co.kr/board/diablo4/6057",
+};
+
+// 공용 fetch + HTML 파싱 헬퍼
+async function fetchHTML(url) {
+  const { data } = await axios.get(url, {
+    headers: { "User-Agent": "Mozilla/5.0" },
+    timeout: 20000,
+  });
+  return cheerio.load(data);
 }
 
-export async function fetchSources(){
-  const maxroll = await fetchList('https://maxroll.gg/d4/build-guides', 'a.group', 'href', '.title') || [];
-  const d4builds = await fetchList('https://d4builds.gg/', 'a.card', 'href', '.name') || [];
-  const icy = await fetchList('https://www.icy-veins.com/diablo-4/', 'a[href*="build"]', 'href') || [];
-  const reddit = await fetchList('https://www.reddit.com/r/diablo4/', 'a[data-click-id="body"]', 'href') || [];
-  const inven = await fetchList('https://www.inven.co.kr/diablo4', 'a', 'href') || [];
+// 빌드 링크 + 세부 본문 일부 파싱
+export async function collectSources() {
+  const results = {};
 
-  function uniq(arr){
-    const seen = new Set(); const out=[];
-    for(const it of arr){
-      if(!seen.has(it.url)){ seen.add(it.url); out.push(it);}
-    }
-    return out.slice(0, 6);
+  // MAXROLL
+  try {
+    const $ = await fetchHTML(SITES.maxroll);
+    const links = $("a.guide-card").slice(0, 5);
+    results["Maxroll"] = await Promise.all(
+      links.map(async (_, el) => {
+        const url = "https://maxroll.gg" + $(el).attr("href");
+        const title = $(el).find("h3").text().trim();
+        const $$ = await fetchHTML(url);
+        const body = $$("article").text().slice(0, 4000); // 본문 일부만
+        return { title, url, body };
+      }).get()
+    );
+  } catch (e) {
+    console.error("Maxroll fetch error:", e.message);
   }
 
-  return {
-    Maxroll: uniq(maxroll.length?maxroll:[{title:'Maxroll Diablo 4', url:'https://maxroll.gg/d4'}]),
-    D4builds: uniq(d4builds.length?d4builds:[{title:'D4builds.gg', url:'https://d4builds.gg'}]),
-    IcyVeins: uniq(icy.length?icy:[{title:'Icy Veins D4', url:'https://www.icy-veins.com/diablo-4/'}]),
-    Reddit: uniq(reddit.length?reddit:[{title:'r/diablo4', url:'https://www.reddit.com/r/diablo4/'}]),
-    Inven: uniq(inven.length?inven:[{title:'디아블로 인벤', url:'https://www.inven.co.kr/diablo4'}]),
-  };
+  // ICY VEINS
+  try {
+    const $ = await fetchHTML(SITES.icyveins);
+    const links = $("a[href*='build']").slice(0, 5);
+    results["Icy Veins"] = await Promise.all(
+      links.map(async (_, el) => {
+        const url = $(el).attr("href");
+        const title = $(el).text().trim();
+        const $$ = await fetchHTML(url);
+        const body = $$("article").text().slice(0, 4000);
+        return { title, url, body };
+      }).get()
+    );
+  } catch (e) {
+    console.error("Icy Veins fetch error:", e.message);
+  }
+
+  // Reddit
+  try {
+    const $ = await fetchHTML(SITES.reddit);
+    const posts = $("a[data-click-id='body']").slice(0, 5);
+    results["Reddit"] = posts.map((_, el) => ({
+      title: $(el).text(),
+      url: "https://reddit.com" + $(el).attr("href"),
+      body: "",
+    })).get();
+  } catch (e) {
+    console.error("Reddit fetch error:", e.message);
+  }
+
+  // Inven
+  try {
+    const $ = await fetchHTML(SITES.inven);
+    const posts = $("td.tit > a.subject-link").slice(0, 5);
+    results["인벤"] = posts.map((_, el) => ({
+      title: $(el).text().trim(),
+      url: "https://www.inven.co.kr" + $(el).attr("href"),
+      body: "",
+    })).get();
+  } catch (e) {
+    console.error("Inven fetch error:", e.message);
+  }
+
+  return results;
 }
