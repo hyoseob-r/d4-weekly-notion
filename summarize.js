@@ -2,6 +2,14 @@ import axios from 'axios';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 import { applyKoreanTerms } from "./korean_dict.js";
 
+const payload = {
+  model: "gpt-4o-mini",   // 비용 절약형
+  messages: [...],
+  temperature: 0.2,
+  max_tokens: 900         // 과금 캡
+};
+
+
 export async function makeSummary(sourcesBySite){
   const lines = [];
   for(const [site, items] of Object.entries(sourcesBySite)){
