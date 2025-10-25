@@ -23,9 +23,17 @@ async function run(){
   // 1) Collect sources (titles+urls)
   const sourcesBySite = await fetchSources();
 
-  // 2) Summarize via OpenAI (or fallback text)
-  const summary = await makeSummary(sourcesBySite);
+// 2) Summarize via OpenAI (본문이 충분히 있을 때만)
+const hasRealBody = Object.values(sourcesBySite).some(items =>
+  (items || []).some(it => (it.body || '').length > 200)
+);
 
+const summary = hasRealBody
+  ? await makeSummary(sourcesBySite)
+  : "※ 이번 주는 출처 페이지에서 본문을 충분히 가져오지 못해 링크만 정리했습니다. (크레딧 절약 모드)";
+
+
+  
   // 3) Build Notion blocks (cap under 95)
   const blocks = [];
   blocks.push(H1('📘 주간 메타 빌드 요약'));
