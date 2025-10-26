@@ -1,12 +1,14 @@
 // korean_dict.js
-// 공식 KR 용어 사전 자동 적용 + 시즌 최신 보강 + 이중표기 옵션
-
 import axios from "axios";
+import fs from "fs";
 
-// 커뮤니티가 유지하는 공식 KR 용어 사전(JSON, 영→한 매핑)
-const DICT_URL = "https://raw.githubusercontent.com/D4Korean/d4-official-terms/main/kr_terms.json";
+const DICT_URLS = [
+  "https://raw.githubusercontent.com/D4Korean/d4-official-terms/main/kr_terms.json",
+  "https://raw.githubusercontent.com/D4Korean/d4-official-terms/refs/heads/main/kr_terms.json"
+];
 
-// 크롤링/LLM 결과에서 자주 튀는 표기들 보강(없으면 무시)
+const LOCAL_DICT_PATH = "./data/kr_terms.json";
+
 const PATCH_MAP = {
   "Whirlwind": "휩쓸기",
   "Hammer of the Ancients": "고대인의 망치",
@@ -32,66 +34,70 @@ const PATCH_MAP = {
 
 let dictCache = null;
 
-function normalizeKey(s) {
-  return (s || "")
-    .replace(/[’‘]/g, "'")
-    .replace(/[“”]/g, '"')
-    .trim();
+function normalizeKey(s){ return (s||"").replace(/[’‘]/g,"'").replace(/[“”]/g,'"').trim(); }
+function sortKeysByLengthDesc(obj){ return Object.keys(obj).sort((a,b)=>b.length-a.length); }
+
+async function loadRemote() {
+  for (const url of DICT_URLS) {
+    try {
+      const { data } = await axios.get(url, {
+        headers: { "User-Agent": "Mozilla/5.0 (D4WeeklyBot/1.0)" },
+        timeout: 20000
+      });
+      console.log(`[KR-DICT] loaded remote: ${url}`);
+      return data;
+    } catch(e) {
+      console.warn(`[KR-DICT] remote fail ${url}: ${e.message}`);
+    }
+  }
+  return null;
 }
 
-// 길이가 긴 키부터 치환해서 부분 매칭 부작용 감소
-function sortKeysByLengthDesc(obj) {
-  return Object.keys(obj).sort((a, b) => b.length - a.length);
+function loadLocal() {
+  try {
+    if (fs.existsSync(LOCAL_DICT_PATH)) {
+      const raw = fs.readFileSync(LOCAL_DICT_PATH, "utf-8");
+      console.log("[KR-DICT] loaded local:", LOCAL_DICT_PATH);
+      return JSON.parse(raw);
+    }
+  } catch(e) {
+    console.warn("[KR-DICT] local load fail:", e.message);
+  }
+  return null;
 }
 
 export async function loadKRDict() {
   if (dictCache) return dictCache;
-  try {
-    const { data } = await axios.get(DICT_URL, {
-      headers: { "User-Agent": "Mozilla/5.0 (D4WeeklyBot/1.0)" },
-      timeout: 20000
-    });
-    // 안전 합치기: 원본 사전이 우선, PATCH_MAP은 보강
-    dictCache = { ...PATCH_MAP, ...data };
-  } catch (e) {
-    // 원본 사전 못 불러오면 보강 맵만 사용
-    dictCache = { ...PATCH_MAP };
-    console.error("KR 용어 사전 로드 실패:", e.message);
-  }
-  // 키 정규화
+
+  // 1) 원격 시도 → 2) 로컬 파일 → 3) 패치맵
+  const remote = await loadRemote();
+  const local = loadLocal();
+  const base = remote || local || {};
+  let merged = { ...PATCH_MAP, ...base };
+
   const fixed = {};
-  for (const [k, v] of Object.entries(dictCache)) {
-    fixed[normalizeKey(k)] = v;
-  }
+  for (const [k, v] of Object.entries(merged)) fixed[normalizeKey(k)] = v;
   dictCache = fixed;
+
+  const source = remote ? "remote" : local ? "local" : "patch";
+  console.log(`[KR-DICT] using source: ${source}, size: ${Object.keys(dictCache).length}`);
   return dictCache;
 }
 
-/**
- * 텍스트에 공식 한글 용어 적용
- * @param {string} text
- * @param {{bilingual?: boolean}} opts
- */
 export async function applyKoreanTerms(text, opts = {}) {
   const { bilingual = false } = opts;
   const dict = await loadKRDict();
-
   let out = text || "";
-  const keys = sortKeysByLengthDesc(dict);
+  let hit = 0;
 
-  for (const engRaw of keys) {
-    const eng = normalizeKey(engRaw);
-    if (!eng) continue;
-    const kor = dict[engRaw] || dict[eng];
-    if (!kor) continue;
-
-    // 단어 경계: 영문/숫자 조합을 기준으로 최소한의 경계만 적용
-    const pattern = `(?<![A-Za-z0-9])${eng.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9])`;
+  for (const eng of sortKeysByLengthDesc(dict)) {
+    const kor = dict[eng];
+    const pattern = `(?<![A-Za-z0-9])${eng.replace(/[.*+?^${}()|[\\]\\\\]/g,"\\$&")}(?![A-Za-z0-9])`;
     const re = new RegExp(pattern, "gi");
-
-    out = out.replace(re, (m) => {
-      return bilingual ? `${kor} (${m})` : kor;
-    });
+    const before = out;
+    out = out.replace(re, m => bilingual ? `${kor} (${m})` : kor);
+    if (out !== before) hit++;
   }
+  console.log(`[KR-DICT] replacements: ${hit}`);
   return out;
 }
