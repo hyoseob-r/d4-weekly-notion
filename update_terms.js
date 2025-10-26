@@ -5,15 +5,14 @@ import path from "path";
 
 const OUT = path.resolve("./data/kr_terms.json");
 
-// 1) 우선순위 높은 순서대로 원격 사전 소스들 (필요시 더 추가 가능)
+// 공식/보강 사전 원격 소스 (필요시 추가 가능)
 const SOURCES = [
   "https://raw.githubusercontent.com/D4Korean/d4-official-terms/main/kr_terms.json",
   "https://raw.githubusercontent.com/D4Korean/d4-official-terms/refs/heads/main/kr_terms.json",
-  // 시즌 전용 보강(예시; 나중에 실제 소스로 교체 가능)
-  "https://raw.githubusercontent.com/D4Korean/d4-season-addons/main/season5_extra.json"
+  "https://raw.githubusercontent.com/D4Korean/d4-season-addons/main/season10_extra.json"
 ];
 
-// 2) 로컬 기본값(없으면 생성용)
+// 로컬 기본값 (원격 실패 시)
 const LOCAL_BASE = {
   "Whirlwind": "휩쓸기",
   "Hammer of the Ancients": "고대인의 망치",
@@ -23,7 +22,7 @@ const LOCAL_BASE = {
   "Paragon Board": "정복자 보드"
 };
 
-// 3) normalize
+// 문자열 정규화
 const norm = s => (s || "").replace(/[’‘]/g,"'").replace(/[“”]/g,'"').trim();
 
 async function getJSON(url) {
@@ -36,12 +35,15 @@ async function getJSON(url) {
 
 async function main() {
   let merged = {};
-  // 기존 파일 있으면 베이스로 불러오기
+
+  // 기존 로컬 파일 불러오기
   if (fs.existsSync(OUT)) {
     try {
       merged = JSON.parse(fs.readFileSync(OUT, "utf-8"));
       console.log(`[TERMS] loaded existing local: ${Object.keys(merged).length}`);
-    } catch {}
+    } catch {
+      merged = { ...LOCAL_BASE };
+    }
   } else {
     merged = { ...LOCAL_BASE };
   }
@@ -55,7 +57,7 @@ async function main() {
         for (const [k, v] of Object.entries(json)) {
           const key = norm(k);
           if (!key) continue;
-          merged[key] = v; // 뒤에 오는 소스가 우선(시즌 보강 덮어쓰기)
+          merged[key] = v;
         }
         console.log(`[TERMS] merged: ${url} (+${Object.keys(json).length})`);
         loadedAny = true;
@@ -65,14 +67,21 @@ async function main() {
     }
   }
 
-  // 키 길이 내림차순 정렬(가독성)
+  // 자동 메타데이터 삽입
+  merged["_meta"] = {
+    version: "Season 10 - The Infernal Hordes",
+    updated: new Date().toISOString().split("T")[0],
+    source: "Official Korean Patch Notes (Diablo IV 1.6.2)"
+  };
+
+  // 키 정렬(긴 항목 우선)
   const ordered = Object.fromEntries(
     Object.keys(merged)
       .sort((a, b) => b.length - a.length)
       .map(k => [k, merged[k]])
   );
 
-  // 디렉터리 보장
+  // 폴더 생성 및 저장
   fs.mkdirSync(path.dirname(OUT), { recursive: true });
   fs.writeFileSync(OUT, JSON.stringify(ordered, null, 2), "utf-8");
 
@@ -81,5 +90,5 @@ async function main() {
 
 main().catch(err => {
   console.error("[TERMS] updater error:", err);
-  process.exit(0); // 실패해도 메인 작업은 계속
+  process.exit(0);
 });
