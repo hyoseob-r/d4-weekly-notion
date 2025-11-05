@@ -1,152 +1,91 @@
-import axios from 'axios';
-
-/**
- * Minimal weekly Diablo IV meta build updater for Notion.
- * - Creates a new Notion page with a Markdown-style body (as Notion blocks).
- * - Runs headless (no paid APIs). Sources are linked; details can be refined later.
- * ENV:
- *   NOTION_TOKEN: Notion Internal Integration Token
- *   NOTION_DATABASE_ID: Database ID to create pages into
- */
+// index.js — 기존 DB 재사용: 스타팅/일반 테이블에 링크만 적재
+import { fetchSources, classifyItem } from "./sources.js";
+import { notionClient, createDbRow } from "./notion.js";
 
 const NOTION_TOKEN = process.env.NOTION_TOKEN;
-const DATABASE_ID = process.env.NOTION_DATABASE_ID;
+const DB_STARTING = process.env.NOTION_DB_STARTING_ID; // 기존 스타팅 DB
+const DB_GENERAL  = process.env.NOTION_DB_GENERAL_ID;  // 기존 일반 DB
 
-if (!NOTION_TOKEN || !DATABASE_ID) {
-  console.error('Missing NOTION_TOKEN or NOTION_DATABASE_ID env.');
-  process.exit(1);
-}
+if (!NOTION_TOKEN) throw new Error("ENV NOTION_TOKEN 누락");
+if (!DB_STARTING) throw new Error("ENV NOTION_DB_STARTING_ID 누락");
+if (!DB_GENERAL) throw new Error("ENV NOTION_DB_GENERAL_ID 누락");
 
-const notion = axios.create({
-  baseURL: 'https://api.notion.com/v1/',
-  headers: {
-    'Authorization': `Bearer ${NOTION_TOKEN}`,
-    'Notion-Version': '2022-06-28',
-    'Content-Type': 'application/json'
+const nc = notionClient(NOTION_TOKEN);
+
+function dedupe(arr){
+  const seen = new Set();
+  const out = [];
+  for (const x of arr){
+    const key = `${(x.title||'').trim()}|${(x.url||'').trim()}`;
+    if (!seen.has(key)) { seen.add(key); out.push(x); }
   }
-});
-
-function todayKSTISO() {
+  return out;
+}
+function todayKST(){
   const now = new Date();
-  // Convert to KST offset +09:00
-  const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
-  const kst = new Date(utc + (9 * 60 * 60000));
-  return kst.toISOString().slice(0, 19).replace('T',' ');
+  const kst = new Date(now.getTime() + 9*60*60*1000);
+  return kst.toISOString().slice(0,10);
 }
 
-const sources = [
-  { name: 'Maxroll.gg', url: 'https://maxroll.gg/d4' },
-  { name: 'D4builds.gg', url: 'https://d4builds.gg' },
-  { name: 'Icy Veins', url: 'https://www.icy-veins.com/diablo-4/' },
-  { name: 'Reddit r/diablo4', url: 'https://www.reddit.com/r/diablo4/' },
-  { name: '디아블로 인벤', url: 'https://www.inven.co.kr/diablo4' }
-];
+async function main(){
+  const sourcesBySite = await fetchSources();
 
-// Predefined classes for the template
-const classes = ['Barbarian','Druid','Rogue','Sorcerer','Necromancer'];
-
-function paragraph(text) {
-  return {
-    object: 'block',
-    type: 'paragraph',
-    paragraph: {
-      rich_text: [{ type: 'text', text: { content: text } }]
+  // 평면화
+  const flat = [];
+  for (const [site, items] of Object.entries(sourcesBySite || {})) {
+    for (const it of (items || [])) {
+      flat.push({
+        source: site,
+        title: it.title,
+        url: it.url,
+        skillUrl: (it.links?.skills || [])[0] || null,
+        paragonUrl: (it.links?.paragon || [])[0] || null
+      });
     }
-  };
-}
+  }
 
-function heading(text, level=2) {
-  const key = level === 1 ? 'heading_1' : (level === 2 ? 'heading_2' : 'heading_3');
-  return {
-    object: 'block',
-    type: key,
-    [key]: {
-      rich_text: [{ type: 'text', text: { content: text } }]
+  // 분류
+  const rows = dedupe(flat).map(it => {
+    const { className, isStarting } = classifyItem(it);
+    return {
+      className,
+      isStarting,
+      source: it.source,
+      title: it.title,
+      articleUrl: it.url,
+      skillUrl: it.skillUrl,
+      paragonUrl: it.paragonUrl,
+      collectedAt: todayKST()
+    };
+  }).filter(r => !!r.className);
+
+  // 직업 버킷
+  const classes = ["Barbarian","Sorcerer","Rogue","Druid","Necromancer","Spiritborn"];
+  const byClass = Object.fromEntries(classes.map(c => [c, { starting: [], general: [] }]));
+  for (const r of rows){
+    if (!byClass[r.className]) byClass[r.className] = { starting: [], general: [] };
+    if (r.isStarting) byClass[r.className].starting.push(r);
+    else byClass[r.className].general.push(r);
+  }
+
+  // 적재
+  let created = 0;
+  const SCHEMA = { title:'제목', class:'직업', source:'출처', article:'원문', skill:'스킬트리', paragon:'정복자', date:'수집일' };
+  for (const c of Object.keys(byClass)){
+    for (const r of byClass[c].starting){
+      await createDbRow(nc, DB_STARTING, r, SCHEMA);
+      created++;
     }
-  };
-}
-
-function bulleted(items) {
-  return items.map(t => ({
-    object: 'block',
-    type: 'bulleted_list_item',
-    bulleted_list_item: {
-      rich_text: [{ type: 'text', text: { content: t } }]
+    for (const r of byClass[c].general){
+      await createDbRow(nc, DB_GENERAL, r, SCHEMA);
+      created++;
     }
-  }));
+  }
+
+  console.log(`✅ Notion rows created: ${created}`);
 }
 
-function linkList(items) {
-  return items.map(s => ({
-    object: 'block',
-    type: 'paragraph',
-    paragraph: {
-      rich_text: [{
-        type: 'text',
-        text: { content: `• ${s.name}`, link: { url: s.url } }
-      }]
-    }
-  }));
-}
-
-function classTemplate(cls) {
-  const blocks = [];
-  blocks.push(heading(`■ ${cls}`, 2));
-  blocks.push(heading('스타팅 빌드', 3));
-  blocks.push(paragraph('아이템 세팅: '));
-  blocks.push(paragraph('보석 세팅: '));
-  blocks.push(paragraph('룬/문양(정복자 글리프): '));
-  blocks.push(paragraph('직업 특성(전문화): '));
-  blocks.push(paragraph('스킬 세팅: '));
-  blocks.push(paragraph('정복자 보드/노드: '));
-  blocks.push(paragraph('시즌 전용 기믹: '));
-  blocks.push(paragraph('난이도·장비 의존도·보스전/속도 파밍 효율: '));
-
-  blocks.push(heading('엔드세팅 빌드', 3));
-  blocks.push(paragraph('아이템 세팅: '));
-  blocks.push(paragraph('보석 세팅: '));
-  blocks.push(paragraph('룬/문양(정복자 글리프): '));
-  blocks.push(paragraph('직업 특성(전문화): '));
-  blocks.push(paragraph('스킬 세팅: '));
-  blocks.push(paragraph('정복자 보드/노드: '));
-  blocks.push(paragraph('시즌 전용 기믹: '));
-  blocks.push(paragraph('난이도·장비 의존도·보스전/속도 파밍 효율: '));
-
-  blocks.push(paragraph('지난주 대비 변경점: '));
-  return blocks;
-}
-
-async function createPage() {
-  const title = `Diablo IV 주간 메타 빌드 – ${todayKSTISO()} KST`;
-  const children = [];
-
-  children.push(heading('📘 주간 메타 빌드 요약', 1));
-  children.push(paragraph('본 문서는 자동 생성되었습니다. 각 클래스별 스타팅/엔드세팅 섹션에 최신 정보를 기입하세요.'));
-  children.push(heading('출처', 2));
-  children.push(...linkList(sources));
-
-  classes.forEach(cls => {
-    children.push(...classTemplate(cls));
-  });
-  if (children.length > 90) children.length = 90; // 블록 수 제한 방지
-
-  const payload = {
-    parent: { database_id: DATABASE_ID },
-    properties: {
-      Name: { title: [{ text: { content: title } }] },
-      Week: { rich_text: [{ text: { content: new Date().toISOString().slice(0,10) } }] }
-    },
-    children
-  };
-
-  const res = await notion.post('pages', payload);
-  return res.data;
-}
-
-try {
-  const out = await createPage();
-  console.log('Created Notion page:', out.id);
-} catch (e) {
-  console.error('Failed to create Notion page:', e.response?.data || e.message);
+main().catch(err=>{
+  console.error("🚨", err?.response?.data || err);
   process.exit(1);
-}
+});
